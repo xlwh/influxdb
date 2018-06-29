@@ -1,6 +1,7 @@
 package tsm1_test
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,7 +19,8 @@ func TestDigest_None(t *testing.T) {
 
 	df := MustTempFile(dir)
 
-	if err := tsm1.Digest(dir, df); err != nil {
+	files := []string{}
+	if err := tsm1.Digest(dir, files, df); err != nil {
 		t.Fatalf("digest error: %v", err)
 	}
 
@@ -32,6 +34,15 @@ func TestDigest_None(t *testing.T) {
 		t.Fatalf("NewDigestReader error: %v", err)
 	}
 	defer r.Close()
+
+	mfest, err := r.ReadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mfest.Entries) != 0 {
+		t.Fatalf("exp: 0, got: %d", len(mfest.Entries))
+	}
 
 	var count int
 	for {
@@ -61,13 +72,18 @@ func TestDigest_One(t *testing.T) {
 	}
 	MustWriteTSM(dir, 1, writes)
 
+	files, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("*.%s", tsm1.TSMFileExtension)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	df := MustTempFile(dir)
 
-	if err := tsm1.Digest(dir, df); err != nil {
+	if err := tsm1.Digest(dir, files, df); err != nil {
 		t.Fatalf("digest error: %v", err)
 	}
 
-	df, err := os.Open(df.Name())
+	df, err = os.Open(df.Name())
 	if err != nil {
 		t.Fatalf("open error: %v", err)
 	}
@@ -77,6 +93,15 @@ func TestDigest_One(t *testing.T) {
 		t.Fatalf("NewDigestReader error: %v", err)
 	}
 	defer r.Close()
+
+	mfest, err := r.ReadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mfest.Entries) != 1 {
+		t.Fatalf("exp: 1, got: %d", len(mfest.Entries))
+	}
 
 	var count int
 	for {
@@ -122,13 +147,18 @@ func TestDigest_TimeFilter(t *testing.T) {
 	}
 	MustWriteTSM(dir, 3, writes)
 
+	files, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("*.%s", tsm1.TSMFileExtension)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	df := MustTempFile(dir)
 
-	if err := tsm1.DigestWithOptions(dir, tsm1.DigestOptions{MinTime: 2, MaxTime: 2}, df); err != nil {
+	if err := tsm1.DigestWithOptions(dir, files, tsm1.DigestOptions{MinTime: 2, MaxTime: 2}, df); err != nil {
 		t.Fatalf("digest error: %v", err)
 	}
 
-	df, err := os.Open(df.Name())
+	df, err = os.Open(df.Name())
 	if err != nil {
 		t.Fatalf("open error: %v", err)
 	}
@@ -138,6 +168,15 @@ func TestDigest_TimeFilter(t *testing.T) {
 		t.Fatalf("NewDigestReader error: %v", err)
 	}
 	defer r.Close()
+
+	mfest, err := r.ReadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mfest.Entries) != 3 {
+		t.Fatalf("exp: 3, got: %d", len(mfest.Entries))
+	}
 
 	var count int
 	for {
@@ -189,15 +228,20 @@ func TestDigest_KeyFilter(t *testing.T) {
 	}
 	MustWriteTSM(dir, 3, writes)
 
+	files, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("*.%s", tsm1.TSMFileExtension)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	df := MustTempFile(dir)
 
-	if err := tsm1.DigestWithOptions(dir, tsm1.DigestOptions{
+	if err := tsm1.DigestWithOptions(dir, files, tsm1.DigestOptions{
 		MinKey: []byte("cpu,host=B#!~#value"),
 		MaxKey: []byte("cpu,host=B#!~#value")}, df); err != nil {
 		t.Fatalf("digest error: %v", err)
 	}
 
-	df, err := os.Open(df.Name())
+	df, err = os.Open(df.Name())
 	if err != nil {
 		t.Fatalf("open error: %v", err)
 	}
@@ -207,6 +251,15 @@ func TestDigest_KeyFilter(t *testing.T) {
 		t.Fatalf("NewDigestReader error: %v", err)
 	}
 	defer r.Close()
+
+	mfest, err := r.ReadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mfest.Entries) != 3 {
+		t.Fatalf("exp: 3, got: %d", len(mfest.Entries))
+	}
 
 	var count int
 	for {
@@ -226,3 +279,93 @@ func TestDigest_KeyFilter(t *testing.T) {
 		t.Fatalf("count mismatch: got %v, exp %v", got, exp)
 	}
 }
+
+//func TestDigest_Manifest(t *testing.T) {
+//	// Create temp directory to hold test files.
+//	dir := MustTempDir()
+//	defer os.RemoveAll(dir)
+//
+//	// Create a point to write to the tsm files.
+//	a1 := tsm1.NewValue(1, 1.1)
+//	writes := map[string][]tsm1.Value{
+//		"cpu,host=A#!~#value": []tsm1.Value{a1},
+//	}
+//
+//	// Write a few tsm files.
+//	var files []string
+//	gen := 1
+//	for ; gen < 4; gen++ {
+//		name := MustWriteTSM(dir, gen, writes)
+//		files = append(files, name)
+//	}
+//
+//	// Generate a manifest.
+//	mfest, err := tsm1.NewDigestManifest(dir, files)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	// Make sure manifest contains only the expected files.
+//	var got []string
+//	for _, e := range mfest.Entries {
+//		got = append(got, e.Filename)
+//	}
+//
+//	sort.StringSlice(files).Sort()
+//	sort.StringSlice(got).Sort()
+//
+//	if !reflect.DeepEqual(files, got) {
+//		t.Fatalf("exp: %v, got: %v", files, got)
+//	}
+//
+//	// Test writing manifest to disk.
+//	if err := tsm1.WriteDigestManifest(mfest); err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	// Test reading manifest from disk.
+//	mfest2, err := tsm1.ReadDigestManifest(dir)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	if !reflect.DeepEqual(mfest, mfest2) {
+//		t.Fatalf("exp: %v, got: %v", mfest, mfest2)
+//	}
+//
+//	// Create a digest.
+//	f, err := os.Create(tsm1.DigestFilename)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	if err := tsm1.Digest(dir, f); err != nil {
+//		t.Fatalf("digest error: %v", err)
+//	}
+//
+//	// Test that digest is not stale.
+//
+//	// Write an extra tsm file that shouldn't be included in the manifest.
+//	extra := MustWriteTSM(dir, gen, writes)
+//
+//	// Re-generate manifest.
+//	mfest, err = tsm1.NewDigestManifest(dir, files)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	// Make sure manifest contains only the expected files.
+//	got = got[:0]
+//	for _, e := range mfest.Entries {
+//		if e.Filename == extra {
+//			t.Fatal("extra file in shard directory should not be in digest manifest")
+//		}
+//		got = append(got, e.Filename)
+//	}
+//
+//	sort.StringSlice(got).Sort()
+//
+//	if !reflect.DeepEqual(files, got) {
+//		t.Fatalf("exp: %v, got: %v", files, got)
+//	}
+//}

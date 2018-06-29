@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ import (
 	"github.com/influxdata/influxdb/tsdb/index/inmem"
 	"github.com/influxdata/influxdb/tsdb/index/tsi1"
 	"github.com/influxdata/influxql"
+	"github.com/prometheus/common/log"
 	"go.uber.org/zap"
 )
 
@@ -277,6 +279,95 @@ func (e *Engine) WithParseFileNameFunc(parseFileNameFunc ParseFileNameFunc) {
 	e.Compactor.WithParseFileNameFunc(parseFileNameFunc)
 }
 
+// digestFresh returns true if there is a valid fresh (not stale) digest file
+// available on disk.
+func (e *Engine) digestFresh(f *os.File) bool {
+	// Get digest file info.
+	digest, err := f.Stat()
+	if err != nil {
+		log.Info("Digest stale, can't stat digest file", zap.Uint64("shard", e.id), zap.String("name", f.Name()), zap.Error(err))
+		return false
+	}
+
+	// See if shard was modified after digest was generated.
+	shardTime := e.LastModified()
+	if shardTime.After(digest.ModTime()) {
+		log.Info("Digest stale, shard modified", zap.Uint64("shard", e.id), zap.Time("shard_time", shardTime), zap.Time("digest_time", digest.ModTime()))
+		return false
+	}
+
+	// Read the manifest from the digest file.
+	dr, err := NewDigestReader(f)
+	if err != nil {
+		log.Info("Digest stale, couldn't read digest file", zap.Uint64("shard", e.id), zap.Error(err))
+		return false
+	}
+
+	mfest, err := dr.ReadManifest()
+	if err != nil {
+		log.Info("Digest stale, couldn't read manifest", zap.Uint64("shard", e.id), zap.Error(err))
+		return false
+	}
+
+	// Make sure the digest file belongs to this shard.
+	if mfest.Dir != e.path {
+		log.Info("Digest belongs to another shard. Manually copied?", zap.Uint64("shard", e.id), zap.String("manifest_dir", mfest.Dir), zap.String("shard_dir", e.path))
+		return false
+	}
+
+	// Get list of tsm files the engine is currently using for this shard.
+	tsmfiles := e.FileStore.Files()
+
+	// See if the number of tsm files matches what's listed in the manifest.
+	if len(tsmfiles) != len(mfest.Entries) {
+		log.Info("Digest stale, number of files differ", zap.Uint64("shard", e.id), zap.Int("engine", len(tsmfiles)), zap.Int("manifest", len(mfest.Entries)))
+		return false
+	}
+
+	// Create a sorted list of tsm file names.
+	tsmnames := make([]string, 0, len(tsmfiles))
+	for _, tsmfile := range tsmfiles {
+		tsmnames = append(tsmnames, tsmfile.Path())
+	}
+	sort.StringSlice(tsmnames).Sort()
+
+	// See if all the tsm files match the manifest.
+	for i, tsmname := range tsmnames {
+		entry := mfest.Entries[i]
+
+		// Check filename.
+		if tsmname != entry.Filename {
+			log.Info("Digest stale, names don't match", zap.Uint64("shard", e.id), zap.Int("manifest_entry", i), zap.String("engine", tsmname), zap.String("manifest", entry.Filename))
+			return false
+		}
+
+		// Get tsm file info.
+		tsm, err := os.Stat(tsmname)
+		if err != nil {
+			log.Info("Digest stale, can't stat tsm file", zap.Uint64("shard", e.id), zap.Int("manifest_entry", i), zap.String("path", tsmname), zap.Error(err))
+			return false
+		}
+
+		// See if tsm file size has changed.
+		if tsm.Size() != entry.Size {
+			log.Info("Digest stale, file size changed", zap.Uint64("shard", e.id), zap.Int("manifest_entry", i), zap.String("path", tsmname), zap.Int64("tsm", tsm.Size()), zap.Int64("manifest", entry.Size))
+			return false
+		}
+
+		// See if tsm file was modified after the digest was created. This should be
+		// covered by the engine mod time check above but we'll check each file to
+		// be sure. It's better to regenerate the digest than use a stale one.
+		if tsm.ModTime().After(digest.ModTime()) {
+			log.Info("Digest stale, file modified", zap.Uint64("shard", e.id), zap.Int("manifest_entry", i), zap.String("path", tsmname), zap.Time("tsm_time", tsm.ModTime()), zap.Time("digest_time", digest.ModTime()))
+			return false
+		}
+	}
+
+	// Digest is fresh.
+	log.Info("Digest cache fresh", zap.Uint64("shard", e.id))
+	return true
+}
+
 // Digest returns a reader for the shard's digest.
 func (e *Engine) Digest() (io.ReadCloser, int64, error) {
 	log, logEnd := logger.NewOperation(e.logger, "Engine digest", "tsm1_digest")
@@ -284,47 +375,38 @@ func (e *Engine) Digest() (io.ReadCloser, int64, error) {
 
 	log.Info("Starting digest", zap.String("tsm1_path", e.path))
 
-	digestPath := filepath.Join(e.path, "digest.tsd")
+	digestPath := filepath.Join(e.path, DigestFilename)
 
 	// See if there's an existing digest file on disk.
 	f, err := os.Open(digestPath)
 	if err == nil {
-		// There is an existing digest file. Now see if it is still fresh.
+		// Digest exists, see if it's fresh.
 		fi, err := f.Stat()
 		if err != nil {
-			log.Info("Digest aborted, can't stat existing digest", zap.Error(err))
-			f.Close()
+			log.Info("Digest aborted, couldn't stat digest file", zap.Uint64("shard", e.id), zap.Error(err))
 			return nil, 0, err
 		}
 
-		engineLastMod := e.LastModified()
-
-		if !engineLastMod.After(fi.ModTime()) {
-			// Existing digest is still fresh so return a reader for it.
-			fi, err := f.Stat()
-			if err != nil {
-				log.Info("Digest aborted, can't stat existing digest", zap.Error(err))
-				f.Close()
-				return nil, 0, err
-			}
-
-			log.Info("Digest cache fresh", zap.Time("engine_last_modified", engineLastMod),
-				zap.Time("digest_cache_last_modified", fi.ModTime()), zap.Int64("size", fi.Size()))
-
+		if e.digestFresh(f) {
+			f.Seek(0, 0)
 			return f, fi.Size(), nil
 		}
 
+		// Digest is stale so close it and continue on to generate a new digest.
 		if err := f.Close(); err != nil {
 			log.Info("Digest aborted, problem closing digest", zap.Error(err))
 			return nil, 0, err
 		}
-
-		log.Info("Digest cache stale", zap.Time("engine_last_modified", engineLastMod),
-			zap.Time("digest_cache_last_modified", fi.ModTime()), zap.Int64("size", fi.Size()))
 	}
 
 	// Either no digest existed or the existing one was stale
 	// so generate a new digest.
+
+	// Make sure the directory exists, in case it was deleted for some reason.
+	if err := os.MkdirAll(e.path, 0777); err != nil {
+		log.Info("Digest aborted, problem creating shard directory path", zap.Error(err))
+		return nil, 0, err
+	}
 
 	// Create a tmp file to write the digest to.
 	tf, err := os.Create(digestPath + ".tmp")
@@ -333,8 +415,15 @@ func (e *Engine) Digest() (io.ReadCloser, int64, error) {
 		return nil, 0, err
 	}
 
+	// Get a list of tsm file paths from the FileStore.
+	files := e.FileStore.Files()
+	filepaths := make([]string, 0, len(files))
+	for _, f := range files {
+		filepaths = append(filepaths, f.Path())
+	}
+
 	// Write the new digest to the tmp file.
-	if err := Digest(e.path, tf); err != nil {
+	if err := Digest(e.path, filepaths, tf); err != nil {
 		log.Info("Digest aborted, problem writing tmp digest", zap.Error(err))
 		tf.Close()
 		os.Remove(tf.Name())

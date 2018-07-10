@@ -108,13 +108,15 @@ func (s *Store) Statistics(tags map[string]string) []models.Statistic {
 	for _, database := range databases {
 		sc, err := s.SeriesCardinality(database)
 		if err != nil {
-			s.Logger.Info("Cannot retrieve series cardinality", zap.Error(err))
+			s.Logger.Info("Cannot retrieve series cardinality", zap.Error(err),
+				logger.Database(database))
 			continue
 		}
 
 		mc, err := s.MeasurementsCardinality(database)
 		if err != nil {
-			s.Logger.Info("Cannot retrieve measurement cardinality", zap.Error(err))
+			s.Logger.Info("Cannot retrieve measurement cardinality", zap.Error(err),
+				logger.Database(database))
 			continue
 		}
 
@@ -1755,7 +1757,9 @@ func (s *Store) monitorShards() {
 			for _, sh := range s.shards {
 				if sh.IsIdle() {
 					if err := sh.Free(); err != nil {
-						s.Logger.Warn("Error while freeing cold shard resources", zap.Error(err))
+						s.Logger.Warn("Error while freeing cold shard resources",
+							zap.Error(err),
+							zap.Uint64("shard", sh.ID()))
 					}
 				} else {
 					sh.SetCompactionsEnabled(true)
@@ -1813,7 +1817,10 @@ func (s *Store) monitorShards() {
 				indexSet := IndexSet{Indexes: []Index{firstShardIndex}, SeriesFile: sfile}
 				names, err := indexSet.MeasurementNamesByExpr(nil, nil)
 				if err != nil {
-					s.Logger.Warn("Cannot retrieve measurement names", zap.Error(err))
+					s.Logger.Warn("Cannot retrieve measurement names",
+						zap.Error(err),
+						zap.Uint64("shard", sh.ID()),
+						logger.Database(db))
 					return nil
 				}
 

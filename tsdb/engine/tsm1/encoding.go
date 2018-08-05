@@ -11,6 +11,8 @@ import (
 	"github.com/influxdata/influxql"
 )
 
+
+// 进行数据编码
 const (
 	// BlockFloat64 designates a block encodes float64 values.
 	BlockFloat64 = byte(0)

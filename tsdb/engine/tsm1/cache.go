@@ -35,18 +35,20 @@ func ErrCacheMemorySizeLimitExceeded(n, limit uint64) error {
 // entry is a set of values and some metadata.
 type entry struct {
 	mu     sync.RWMutex
-	values Values // All stored values.
+	values Values // All stored values.，数据直接转成二进制放进来
 
 	// The type of values stored. Read only so doesn't need to be protected by
 	// mu.
-	vtype byte
+	vtype byte  // 数据类型
 }
 
 // newEntryValues returns a new instance of entry with the given values.  If the
 // values are not valid, an error is returned.
+// 创建新的entry来写数据
 func newEntryValues(values []Value) (*entry, error) {
-	e := &entry{}
+	e := &entry{} // 创建新的entry来写数据
 	e.values = make(Values, 0, len(values))
+	// 把数据都写到entry里面去
 	e.values = append(e.values, values...)
 
 	// No values, don't check types and ordering
@@ -54,6 +56,7 @@ func newEntryValues(values []Value) (*entry, error) {
 		return e, nil
 	}
 
+	// 写value type
 	et := valueType(values[0])
 	for _, v := range values {
 		// Make sure all the values are the same type
@@ -69,12 +72,15 @@ func newEntryValues(values []Value) (*entry, error) {
 }
 
 // add adds the given values to the entry.
+// 写数据,增加一个entry，外层有一个map，可以通过map找到这个entry
 func (e *entry) add(values []Value) error {
+	// 没数据
 	if len(values) == 0 {
 		return nil // Nothing to do.
 	}
 
 	// Are any of the new values the wrong type?
+	// 在这里判断数据的类型
 	if e.vtype != 0 {
 		for _, v := range values {
 			if e.vtype != valueType(v) {
@@ -86,13 +92,14 @@ func (e *entry) add(values []Value) error {
 	// entry currently has no values, so add the new ones and we're done.
 	e.mu.Lock()
 	if len(e.values) == 0 {
-		e.values = values
-		e.vtype = valueType(values[0])
+		e.values = values   			// 数据
+		e.vtype = valueType(values[0])	// 数据类型
 		e.mu.Unlock()
 		return nil
 	}
 
 	// Append the new values to the existing ones...
+	// 往entry里面写数据
 	e.values = append(e.values, values...)
 	e.mu.Unlock()
 	return nil
@@ -163,6 +170,8 @@ const (
 )
 
 // storer is the interface that descibes a cache's store.
+// 最底层的操作接口
+// 其实就是操作ring
 type storer interface {
 	entry(key []byte) *entry                        // Get an entry by its key.
 	write(key []byte, values Values) (bool, error)  // Write an entry to the store.
@@ -282,8 +291,10 @@ func (c *Cache) Free() {
 
 // Write writes the set of values for the key to the cache. This function is goroutine-safe.
 // It returns an error if the cache will exceed its max size by adding the new values.
+// 写数据
 func (c *Cache) Write(key []byte, values []Value) error {
 	c.init()
+	// 新写入数据的长度
 	addedSize := uint64(Values(values).Size())
 
 	// Enough room in the cache?
@@ -317,6 +328,7 @@ func (c *Cache) Write(key []byte, values []Value) error {
 // its max size by adding the new values.  The write attempts to write as many
 // values as possible.  If one key fails, the others can still succeed and an
 // error will be returned.
+// 写到cache
 func (c *Cache) WriteMulti(values map[string][]Value) error {
 	c.init()
 	var addedSize uint64
@@ -325,6 +337,7 @@ func (c *Cache) WriteMulti(values map[string][]Value) error {
 	}
 
 	// Enough room in the cache?
+	// 判断内存是否用满了，用满了就直接返回异常
 	limit := c.maxSize // maxSize is safe for reading without a lock.
 	n := c.Size() + addedSize
 	if limit > 0 && n > limit {
@@ -339,7 +352,9 @@ func (c *Cache) WriteMulti(values map[string][]Value) error {
 
 	// We'll optimistially set size here, and then decrement it for write errors.
 	c.increaseSize(addedSize)
+	// 遍历kv,写入到底层，可以存任意数据类型
 	for k, v := range values {
+		// 只要tag啥的变了，就是新增了一个监控
 		newKey, err := store.write([]byte(k), v)
 		if err != nil {
 			// The write failed, hold onto the error and adjust the size delta.
@@ -792,6 +807,7 @@ func (c *Cache) updateCachedBytes(b uint64) {
 }
 
 // updateMemSize updates the memSize level by b.
+// 更新当前服务的难处使用量
 func (c *Cache) updateMemSize(b int64) {
 	atomic.AddInt64(&c.stats.MemSizeBytes, b)
 }

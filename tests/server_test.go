@@ -28,16 +28,21 @@ import (
 // Global server used by benchmarks
 var benchServer Server
 
+// 启动主函数
 func TestMain(m *testing.M) {
-	flag.BoolVar(&verboseServerLogs, "vv", false, "Turn on very verbose server logging.")
-	flag.BoolVar(&cleanupData, "clean", true, "Clean up test data on disk.")
-	flag.Int64Var(&seed, "seed", 0, "Set specific seed controlling randomness.")
+	// 设置flags参数
+	flag.BoolVar(&verboseServerLogs, "vv", false, "Turn on very verbose server logging.")  // 打开服务debug日志
+	flag.BoolVar(&cleanupData, "clean", true, "Clean up test data on disk.")       // 是否在测试完成后清理掉测试数据
+	flag.Int64Var(&seed, "seed", 0, "Set specific seed controlling randomness.")   // 设置自定义的随机数种子
+	// 解析命令行参数
 	flag.Parse()
 
 	// Set random seed if not explicitly set.
+	// 默认是以时间为随机数种子
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}
+	// 设置随机数种子
 	rand.Seed(seed)
 
 	var r int

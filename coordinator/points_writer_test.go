@@ -20,7 +20,7 @@ import (
 // Ensures the points writer maps a single point to a single shard.
 func TestPointsWriter_MapShards_One(t *testing.T) {
 	ms := PointsWriterMetaClient{}
-	rp := NewRetentionPolicy("myp", time.Hour, 3)
+	rp := NewRetentionPolicy("myp", time.Hour, 3)   // 存储策略设定的过期时间是1小时，3副本
 
 	ms.NodeIDFn = func() uint64 { return 1 }
 	ms.RetentionPolicyFn = func(db, retentionPolicy string) (*meta.RetentionPolicyInfo, error) {
@@ -32,16 +32,19 @@ func TestPointsWriter_MapShards_One(t *testing.T) {
 	}
 
 	c := coordinator.PointsWriter{MetaClient: ms}
+	// 创建一个请求
 	pr := &coordinator.WritePointsRequest{
-		Database:        "mydb",
-		RetentionPolicy: "myrp",
+		Database:        "mydb",   // db名字
+		RetentionPolicy: "myrp",   // 数据过期策略
 	}
+	// 数据点
 	pr.AddPoint("cpu", 1.0, time.Now(), nil)
 
 	var (
 		shardMappings *coordinator.ShardMapping
 		err           error
 	)
+	// 取出shared
 	if shardMappings, err = c.MapShards(pr); err != nil {
 		t.Fatalf("unexpected an error: %v", err)
 	}

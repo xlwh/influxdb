@@ -46,10 +46,12 @@ const (
 const SeriesFileDirectory = "_series"
 
 // Store manages shards and indexes for databases.
+// 底层数据存储的顶层结构，管理数据库的索引和分片
+// 分片是根据数据过期时间来进行划分的，方便数据进行批量的过期操作
 type Store struct {
 	mu                sync.RWMutex
-	shards            map[uint64]*Shard
-	databases         map[string]struct{}
+	shards            map[uint64]*Shard // 分片
+	databases         map[string]struct{}  // 有哪些数据库,为啥用struct来表示呢?
 	sfiles            map[string]*SeriesFile
 	SeriesFileMaxSize int64 // Determines size of series file mmap. Can be altered in tests.
 	path              string
@@ -59,9 +61,9 @@ type Store struct {
 
 	// Maintains a set of shards that are in the process of deletion.
 	// This prevents new shards from being created while old ones are being deleted.
-	pendingShardDeletes map[uint64]struct{}
+	pendingShardDeletes map[uint64]struct{}   // 待删除的shared，过期的shared
 
-	EngineOptions EngineOptions
+	EngineOptions EngineOptions              // 引擎参数
 
 	baseLogger *zap.Logger
 	Logger     *zap.Logger
@@ -97,6 +99,7 @@ func (s *Store) WithLogger(log *zap.Logger) {
 }
 
 // Statistics returns statistics for period monitoring.
+// 监控统计信息
 func (s *Store) Statistics(tags map[string]string) []models.Statistic {
 	s.mu.RLock()
 	shards := s.shardsSlice()
@@ -203,6 +206,7 @@ func (s *Store) Open() error {
 	return nil
 }
 
+// 启动的时候从文件中加载分片数据
 func (s *Store) loadShards() error {
 	// res holds the result from opening each shard in a goroutine
 	type res struct {
@@ -249,6 +253,7 @@ func (s *Store) loadShards() error {
 	var n int
 
 	// Determine how many shards we need to open by checking the store path.
+	// 取出目录下的所有文件名
 	dbDirs, err := ioutil.ReadDir(s.path)
 	if err != nil {
 		return err
@@ -267,12 +272,14 @@ func (s *Store) loadShards() error {
 		}
 
 		// Load series file.
+		// 加载监控数据
 		sfile, err := s.openSeriesFile(db.Name())
 		if err != nil {
 			return err
 		}
 
 		// Retrieve database index.
+		// 加载索引
 		idx, err := s.createIndexIfNotExists(db.Name())
 		if err != nil {
 			return err
@@ -1246,9 +1253,9 @@ func (s *Store) ExpandSources(sources influxql.Sources) (influxql.Sources, error
 }
 
 // WriteToShard writes a list of points to a shard identified by its ID.
+// 写数据
 func (s *Store) WriteToShard(shardID uint64, points []models.Point) error {
 	s.mu.RLock()
-
 	select {
 	case <-s.closing:
 		s.mu.RUnlock()
@@ -1265,10 +1272,12 @@ func (s *Store) WriteToShard(shardID uint64, points []models.Point) error {
 
 	// Ensure snapshot compactions are enabled since the shard might have been cold
 	// and disabled by the monitor.
+	// 服务比较空闲，可以gc
 	if sh.IsIdle() {
 		sh.SetCompactionsEnabled(true)
 	}
 
+	// 调用底层的shared写数据
 	return sh.WritePoints(points)
 }
 

@@ -56,8 +56,8 @@ type PointsWriter struct {
 	}
 
 	TSDBStore interface {
-		CreateShard(database, retentionPolicy string, shardID uint64, enabled bool) error
-		WriteToShard(shardID uint64, points []models.Point) error
+		CreateShard(database, retentionPolicy string, shardID uint64, enabled bool) error  // 创建分片
+		WriteToShard(shardID uint64, points []models.Point) error                          // 写数据，由底层处理
 	}
 
 	subPoints []chan<- *WritePointsRequest
@@ -196,15 +196,19 @@ func (w *PointsWriter) MapShards(wp *WritePointsRequest) (*ShardMapping, error) 
 	}
 
 	// Holds all the shard groups and shards that are required for writes.
+	// 创建一个list，可以放8个元素
 	list := make(sgList, 0, 8)
+	// 拿到当前的时间，作为shared的最小值
 	min := time.Unix(0, models.MinNanoTime)
 	if rp.Duration > 0 {
 		min = time.Now().Add(-rp.Duration)
 	}
 
+	// 遍历每个point
 	for _, p := range wp.Points {
 		// Either the point is outside the scope of the RP, or we already have
 		// a suitable shard group for the point.
+		// 如果找到了合适的shared，那么就不新创建shared了
 		if p.Time().Before(min) || list.Covers(p.Time()) {
 			continue
 		}
@@ -219,6 +223,7 @@ func (w *PointsWriter) MapShards(wp *WritePointsRequest) (*ShardMapping, error) 
 		if sg == nil {
 			return nil, errors.New("nil shard group")
 		}
+		// 创建新的shared，放在list里面
 		list = list.Append(*sg)
 	}
 
@@ -259,6 +264,7 @@ func (l sgList) Covers(t time.Time) bool {
 //
 //  - a shard group with the earliest end time;
 //  - (assuming identical end times) the shard group with the earliest start time.
+// 根据时间戳判断，点是否落在了之前的shared中
 func (l sgList) ShardGroupAt(t time.Time) *meta.ShardGroupInfo {
 	idx := sort.Search(len(l), func(i int) bool { return l[i].EndTime.After(t) })
 
@@ -283,15 +289,22 @@ func (w *PointsWriter) WritePointsInto(p *IntoWriteRequest) error {
 }
 
 // WritePoints writes the data to the underlying storage. consitencyLevel and user are only used for clustered scenarios
+// 请求过来以后，都要调用这个往存储里面写数据
+// db,存储策略，一致性策略，租户，要批量写的点points
 func (w *PointsWriter) WritePoints(database, retentionPolicy string, consistencyLevel models.ConsistencyLevel, user meta.User, points []models.Point) error {
+	// 调用写入指令，进行数据的写入操作
 	return w.WritePointsPrivileged(database, retentionPolicy, consistencyLevel, points)
 }
 
 // WritePointsPrivileged writes the data to the underlying storage, consitencyLevel is only used for clustered scenarios
+// 写底层数据存储
 func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, consistencyLevel models.ConsistencyLevel, points []models.Point) error {
+	// 相关的统计
 	atomic.AddInt64(&w.stats.WriteReq, 1)
 	atomic.AddInt64(&w.stats.PointWriteReq, int64(len(points)))
 
+	// 数据过期策略未指定的话，这里会给默认的数据过期策略
+	// 会先从meta中查找，如果db是空的,那么这里就用默认的策略
 	if retentionPolicy == "" {
 		db := w.MetaClient.Database(database)
 		if db == nil {
@@ -300,15 +313,22 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 		retentionPolicy = db.DefaultRetentionPolicy
 	}
 
-	shardMappings, err := w.MapShards(&WritePointsRequest{Database: database, RetentionPolicy: retentionPolicy, Points: points})
+	// 根据存储策略来寻找合适的shared来存储数据,需要把请求参数转换成WritePointRequest
+	// {"Database":"mydb","RetentionPolicy":"autogen","Points":[{}]}
+	req := &WritePointsRequest{Database: database, RetentionPolicy: retentionPolicy, Points: points}
+	shardMappings, err := w.MapShards(req)
 	if err != nil {
 		return err
 	}
 
 	// Write each shard in it's own goroutine and return as soon as one fails.
+	// 创建多个chan，可以和上层通信
 	ch := make(chan error, len(shardMappings.Points))
+	// 并发往里面写数据
 	for shardID, points := range shardMappings.Points {
+		// 开多个gorouting，调用引擎的写point接口
 		go func(shard *meta.ShardInfo, database, retentionPolicy string, points []models.Point) {
+			// 调用引擎层的写point接口
 			err := w.writeToShard(shard, database, retentionPolicy, points)
 			if err == tsdb.ErrShardDeletion {
 				err = tsdb.PartialWriteError{Reason: fmt.Sprintf("shard %d is pending deletion", shard.ID), Dropped: len(points)}
@@ -364,9 +384,11 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 }
 
 // writeToShards writes points to a shard.
+// 往引擎层写数据
 func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPolicy string, points []models.Point) error {
 	atomic.AddInt64(&w.stats.PointWriteReqLocal, int64(len(points)))
 
+	// 写数据
 	err := w.TSDBStore.WriteToShard(shard.ID, points)
 	if err == nil {
 		atomic.AddInt64(&w.stats.WriteOK, 1)
@@ -374,6 +396,7 @@ func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPo
 	}
 
 	// If this is a partial write error, that is also ok.
+	// 判断写数据是否成功
 	if _, ok := err.(tsdb.PartialWriteError); ok {
 		atomic.AddInt64(&w.stats.WriteErr, 1)
 		return err
@@ -390,6 +413,8 @@ func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPo
 			return err
 		}
 	}
+	// 没找到分片的话，创建分片后，重试一次，
+	// 感觉这样的写法有点奇怪呢
 	err = w.TSDBStore.WriteToShard(shard.ID, points)
 	if err != nil {
 		w.Logger.Info("Write failed", zap.Uint64("shard", shard.ID), zap.Error(err))

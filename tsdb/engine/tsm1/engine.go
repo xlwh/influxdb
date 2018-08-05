@@ -1256,6 +1256,7 @@ func (e *Engine) addToIndexFromKey(keys [][]byte, fieldTypes []influxql.DataType
 
 // WritePoints writes metadata and point data into the engine.
 // It returns an error if new points are added to an existing key.
+// 最终写数据的实现在这
 func (e *Engine) WritePoints(points []models.Point) error {
 	values := make(map[string][]Value, len(points))
 	var (
@@ -1342,15 +1343,18 @@ func (e *Engine) WritePoints(points []models.Point) error {
 			values[string(keyBuf)] = append(values[string(keyBuf)], v)
 		}
 	}
+	//{"cpu_usage,host=bjyz01,idc=bj#!~#value":[{}]}
 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	// first try to write to the cache
+	// 写数据，其实就是写到cache
 	if err := e.Cache.WriteMulti(values); err != nil {
 		return err
 	}
 
+	// 写操作日志，可配置的
 	if e.WALEnabled {
 		if _, err := e.WAL.WriteMulti(values); err != nil {
 			return err

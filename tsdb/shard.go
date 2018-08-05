@@ -136,8 +136,8 @@ type Shard struct {
 	options EngineOptions
 
 	mu      sync.RWMutex
-	_engine Engine
-	index   Index
+	_engine Engine   // 引擎
+	index   Index    // 索引
 	enabled bool
 
 	// expvar-based stats.
@@ -155,6 +155,7 @@ type Shard struct {
 }
 
 // NewShard returns a new initialized Shard. walPath doesn't apply to the b1 type index
+// 创建新的Shared
 func NewShard(id uint64, path string, walPath string, sfile *SeriesFile, opt EngineOptions) *Shard {
 	db, rp := decodeStorePath(path)
 	logger := zap.NewNop()
@@ -484,6 +485,7 @@ type FieldCreate struct {
 }
 
 // WritePoints will write the raw data points and any new metadata to the index in the shard.
+// 写数据
 func (s *Shard) WritePoints(points []models.Point) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -496,6 +498,7 @@ func (s *Shard) WritePoints(points []models.Point) error {
 	var writeError error
 	atomic.AddInt64(&s.stats.WriteReq, 1)
 
+	// 验证字段
 	points, fieldsToCreate, err := s.validateSeriesAndFields(points)
 	if err != nil {
 		if _, ok := err.(PartialWriteError); !ok {
@@ -513,6 +516,7 @@ func (s *Shard) WritePoints(points []models.Point) error {
 	}
 
 	// Write to the engine.
+	// 写数据到引擎
 	if err := engine.WritePoints(points); err != nil {
 		atomic.AddInt64(&s.stats.WritePointsErr, int64(len(points)))
 		atomic.AddInt64(&s.stats.WriteReqErr, 1)

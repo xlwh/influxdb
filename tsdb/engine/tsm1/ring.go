@@ -15,7 +15,7 @@ import (
 // they're evenly spread across this many partitions in the ring.
 const partitions = 16
 
-// ring is a structure that maps series keys to entries.
+// ring is a structure that maps series keys to entries.   // 简单的hash,监控项到数据的映射
 //
 // ring is implemented as a crude hash ring, in so much that you can have
 // variable numbers of members in the ring, and the appropriate member for a
@@ -40,7 +40,7 @@ type ring struct {
 
 	// The unique set of partitions in the ring.
 	// len(partitions) <= len(continuum)
-	partitions []*partition
+	partitions []*partition   // 这个是为了把map进行拆分，解决gc的问题
 }
 
 // newring returns a new ring initialised with n partitions. n must always be a
@@ -219,11 +219,12 @@ func (r *ring) split(n int) []storer {
 // partition provides safe access to a map of series keys to entries.
 type partition struct {
 	mu    sync.RWMutex
-	store map[string]*entry
+	store map[string]*entry  // 监控数据放在一个hashmap中进行保存
 }
 
 // entry returns the partition's entry for the provided key.
 // It's safe for use by multiple goroutines.
+// 通过key，在map中把entiry找到
 func (p *partition) entry(key []byte) *entry {
 	p.mu.RLock()
 	e := p.store[string(key)]
@@ -234,6 +235,7 @@ func (p *partition) entry(key []byte) *entry {
 // write writes the values to the entry in the partition, creating the entry
 // if it does not exist.
 // write is safe for use by multiple goroutines.
+// 写数据到map中,写到entry中，一个entry里面应该又很多point
 func (p *partition) write(key []byte, values Values) (bool, error) {
 	p.mu.RLock()
 	e := p.store[string(key)]
@@ -247,16 +249,19 @@ func (p *partition) write(key []byte, values Values) (bool, error) {
 	defer p.mu.Unlock()
 
 	// Check again.
+	// 如果entry存在，那么就往entry里面写数据
 	if e = p.store[string(key)]; e != nil {
 		return false, e.add(values)
 	}
 
 	// Create a new entry using a preallocated size if we have a hint available.
+	// 创建entry，往里面写数据
 	e, err := newEntryValues(values)
 	if err != nil {
 		return false, err
 	}
 
+	// 创建好了新的entry，往里面写数据
 	p.store[string(key)] = e
 	return true, nil
 }
@@ -277,6 +282,7 @@ func (p *partition) remove(key []byte) {
 }
 
 // keys returns an unsorted slice of the keys in the partition.
+// 从map中读出所有的key
 func (p *partition) keys() [][]byte {
 	p.mu.RLock()
 	keys := make([][]byte, 0, len(p.store))

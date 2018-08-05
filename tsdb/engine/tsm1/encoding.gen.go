@@ -4,6 +4,8 @@
 // DO NOT EDIT!
 // Source: encoding.gen.go.tmpl
 
+// 数据编码工具，可以吧数据进行编码
+
 package tsm1
 
 import (
@@ -14,7 +16,7 @@ import (
 )
 
 // Values represents a slice of  values.
-type Values []Value
+type Values []Value  // 数据都转成二进制存储起来
 
 func (a Values) MinTime() int64 {
 	return a[0].UnixNano()

@@ -883,6 +883,7 @@ type TestStore struct {
 	countf       func() int
 }
 
+// 简单的实现了一遍接口
 func NewTestStore() *TestStore                                      { return &TestStore{} }
 func (s *TestStore) entry(key []byte) *entry                        { return s.entryf(key) }
 func (s *TestStore) write(key []byte, values Values) (bool, error)  { return s.writef(key, values) }

@@ -163,14 +163,16 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 		return nil, err
 	}
 
+	// tsm引擎
 	s.TSDBStore = tsdb.NewStore(c.Data.Dir)
 	s.TSDBStore.EngineOptions.Config = c.Data
 
 	// Copy TSDB configuration.
-	s.TSDBStore.EngineOptions.EngineVersion = c.Data.Engine
-	s.TSDBStore.EngineOptions.IndexVersion = c.Data.Index
+	s.TSDBStore.EngineOptions.EngineVersion = c.Data.Engine  // 设置引擎版本
+	s.TSDBStore.EngineOptions.IndexVersion = c.Data.Index    // 设置索引版本
 
 	// Create the Subscriber service
+	// 不太懂这个发布订阅服务是干什么的
 	s.Subscriber = subscriber.NewService(c.Subscriber)
 
 	// Initialize points writer.

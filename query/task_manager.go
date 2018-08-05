@@ -93,8 +93,10 @@ func NewTaskManager() *TaskManager {
 }
 
 // ExecuteStatement executes a statement containing one of the task management queries.
+// 执行查询语句
 func (t *TaskManager) ExecuteStatement(stmt influxql.Statement, ctx *ExecutionContext) error {
 	switch stmt := stmt.(type) {
+	// 执行查监控数据
 	case *influxql.ShowQueriesStatement:
 		rows, err := t.executeShowQueriesStatement(stmt)
 		if err != nil {
@@ -178,21 +180,24 @@ func (t *TaskManager) AttachQuery(q *influxql.Query, opt ExecutionOptions, inter
 		return nil, nil, ErrQueryEngineShutdown
 	}
 
+	// 设置了查询的并发度
 	if t.MaxConcurrentQueries > 0 && len(t.queries) >= t.MaxConcurrentQueries {
 		return nil, nil, ErrMaxConcurrentQueriesLimitExceeded(len(t.queries), t.MaxConcurrentQueries)
 	}
 
+	// 分配了查询id
 	qid := t.nextID
 	query := &Task{
-		query:     q.String(),
-		database:  opt.Database,
-		status:    RunningTask,
-		startTime: time.Now(),
+		query:     q.String(),                 // 查询参数
+		database:  opt.Database,               // 数据库
+		status:    RunningTask,                // 任务状态
+		startTime: time.Now(),                 // 任务开始执行的时间
 		closing:   make(chan struct{}),
 		monitorCh: make(chan error),
 	}
 	t.queries[qid] = query
 
+	// 等待查询完成
 	go t.waitForQuery(qid, query.closing, interrupt, query.monitorCh)
 	if t.LogQueriesAfter != 0 {
 		go query.monitor(func(closing <-chan struct{}) error {
@@ -217,6 +222,7 @@ func (t *TaskManager) AttachQuery(q *influxql.Query, opt ExecutionOptions, inter
 		ExecutionOptions: opt,
 	}
 	ctx.watch()
+	// 解绑数据查询
 	return ctx, func() { t.DetachQuery(qid) }, nil
 }
 
@@ -278,6 +284,8 @@ func (t *TaskManager) Queries() []QueryInfo {
 	return queries
 }
 
+// 执行数据查询，并等待完成
+// 有超时限制
 func (t *TaskManager) waitForQuery(qid uint64, interrupt <-chan struct{}, closing <-chan struct{}, monitorCh <-chan error) {
 	var timerCh <-chan time.Time
 	if t.QueryTimeout != 0 {

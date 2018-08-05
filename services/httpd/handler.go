@@ -123,6 +123,7 @@ type Handler struct {
 }
 
 // NewHandler returns a new instance of handler with routes.
+// 处理http路由
 func NewHandler(c Config) *Handler {
 	h := &Handler{
 		mux:            pat.New(),
@@ -356,24 +357,31 @@ func (h *Handler) writeHeader(w http.ResponseWriter, code int) {
 }
 
 // serveQuery parses an incoming query and, if valid, executes the query.
+// 查数据
 func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.User) {
 	atomic.AddInt64(&h.stats.QueryRequests, 1)
+	// 统计服务耗时
+	// 开始调用的时候传入开始处理时间，处理结束的时候会调用defer
 	defer func(start time.Time) {
 		atomic.AddInt64(&h.stats.QueryRequestDuration, time.Since(start).Nanoseconds())
 	}(time.Now())
+	// 使用量统计
 	h.requestTracker.Add(r, user)
 
 	// Retrieve the underlying ResponseWriter or initialize our own.
+	// 创建写response服务
 	rw, ok := w.(ResponseWriter)
 	if !ok {
 		rw = NewResponseWriter(w, r)
 	}
 
 	// Retrieve the node id the query should be executed on.
+	// nodeID = 0
 	nodeID, _ := strconv.ParseUint(r.FormValue("node_id"), 10, 64)
 
 	var qr io.Reader
 	// Attempt to read the form value from the "q" form value.
+	// 解析参数q
 	if qp := strings.TrimSpace(r.FormValue("q")); qp != "" {
 		qr = strings.NewReader(qp)
 	} else if r.MultipartForm != nil && r.MultipartForm.File != nil {
@@ -389,6 +397,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 		}
 	}
 
+	// qr是查询类型参数
 	if qr == nil {
 		h.httpError(rw, `missing required parameter "q"`, http.StatusBadRequest)
 		return
@@ -396,8 +405,9 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 
 	epoch := strings.TrimSpace(r.FormValue("epoch"))
 
+	// 把请求参数转为query lange
 	p := influxql.NewParser(qr)
-	db := r.FormValue("db")
+	db := r.FormValue("db")   // 解析db参数
 
 	// Sanitize the request query params so it doesn't show up in the response logger.
 	// Do this before anything else so a parsing error doesn't leak passwords.
@@ -510,6 +520,7 @@ func (h *Handler) serveQuery(w http.ResponseWriter, r *http.Request, user meta.U
 	}
 
 	// Execute query.
+	// 调用查询服务进行查询
 	results := h.QueryExecutor.ExecuteQuery(q, opts, closing)
 
 	// If we are running in async mode, open a goroutine to drain the results

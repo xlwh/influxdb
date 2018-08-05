@@ -122,6 +122,7 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 		}
 	}
 
+	// 启动的时候，加载meta数据
 	_, err := influxdb.LoadNode(c.Meta.Dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -146,7 +147,7 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 
 		Logger: logger.New(os.Stderr),
 
-		MetaClient: meta.NewClient(c.Meta),
+		MetaClient: meta.NewClient(c.Meta),   // 读写meta的地方
 
 		reportingDisabled: c.ReportingDisabled,
 
@@ -156,6 +157,8 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 
 		config: c,
 	}
+
+	// 监控服务
 	s.Monitor = monitor.New(s, c.Monitor)
 	s.config.registerDiagnostics(s.Monitor)
 
@@ -176,22 +179,26 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 	s.Subscriber = subscriber.NewService(c.Subscriber)
 
 	// Initialize points writer.
+	// 写数据的服务
 	s.PointsWriter = coordinator.NewPointsWriter()
 	s.PointsWriter.WriteTimeout = time.Duration(c.Coordinator.WriteTimeout)
+
+	// 传入引擎
 	s.PointsWriter.TSDBStore = s.TSDBStore
 
 	// Initialize query executor.
+	// 查询执行器
 	s.QueryExecutor = query.NewExecutor()
 	s.QueryExecutor.StatementExecutor = &coordinator.StatementExecutor{
-		MetaClient:  s.MetaClient,
-		TaskManager: s.QueryExecutor.TaskManager,
-		TSDBStore:   s.TSDBStore,
+		MetaClient:  s.MetaClient,                                      // meta
+		TaskManager: s.QueryExecutor.TaskManager,                       // 任务管理器
+		TSDBStore:   s.TSDBStore,                                       // 底层引擎
 		ShardMapper: &coordinator.LocalShardMapper{
 			MetaClient: s.MetaClient,
 			TSDBStore:  coordinator.LocalTSDBStore{Store: s.TSDBStore},
 		},
-		Monitor:           s.Monitor,
-		PointsWriter:      s.PointsWriter,
+		Monitor:           s.Monitor,                                // 监控服务
+		PointsWriter:      s.PointsWriter,                           // 写数据服务
 		MaxSelectPointN:   c.Coordinator.MaxSelectPointN,
 		MaxSelectSeriesN:  c.Coordinator.MaxSelectSeriesN,
 		MaxSelectBucketsN: c.Coordinator.MaxSelectBucketsN,
@@ -252,10 +259,12 @@ func (s *Server) appendRetentionPolicyService(c retention.Config) {
 	s.Services = append(s.Services, srv)
 }
 
+// 打开http接口
 func (s *Server) appendHTTPDService(c httpd.Config) {
 	if !c.Enabled {
 		return
 	}
+	// 创建http服务
 	srv := httpd.NewService(c)
 	srv.Handler.MetaClient = s.MetaClient
 	srv.Handler.QueryAuthorizer = meta.NewQueryAuthorizer(s.MetaClient)
@@ -361,6 +370,7 @@ func (s *Server) appendContinuousQueryService(c continuous_querier.Config) {
 func (s *Server) Err() <-chan error { return s.err }
 
 // Open opens the meta and data store and all services.
+// 打开服务
 func (s *Server) Open() error {
 	// Start profiling, if set.
 	startProfile(s.CPUProfile, s.MemProfile)
@@ -373,17 +383,18 @@ func (s *Server) Open() error {
 	s.Listener = ln
 
 	// Multiplex listener.
+	// 端口监听和处理
 	mux := tcp.NewMux()
 	go mux.Serve(ln)
 
 	// Append services.
-	s.appendMonitorService()
-	s.appendPrecreatorService(s.config.Precreator)
-	s.appendSnapshotterService()
-	s.appendContinuousQueryService(s.config.ContinuousQuery)
-	s.appendHTTPDService(s.config.HTTPD)
-	s.appendStorageService(s.config.Storage)
-	s.appendRetentionPolicyService(s.config.Retention)
+	s.appendMonitorService()                                    // 监控服务
+	s.appendPrecreatorService(s.config.Precreator)              // 发布订阅服务
+	s.appendSnapshotterService()                                // snapshot服务
+	s.appendContinuousQueryService(s.config.ContinuousQuery)    // 并发查询数据服务
+	s.appendHTTPDService(s.config.HTTPD)                        // 对外的http服务
+	s.appendStorageService(s.config.Storage)                    // 底层存储服务
+	s.appendRetentionPolicyService(s.config.Retention)          // 存储服务
 	for _, i := range s.config.GraphiteInputs {
 		if err := s.appendGraphiteService(i); err != nil {
 			return err

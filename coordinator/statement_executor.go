@@ -537,6 +537,8 @@ func (e *StatementExecutor) executeSetPasswordUserStatement(q *influxql.SetPassw
 }
 
 func (e *StatementExecutor) executeSelectStatement(stmt *influxql.SelectStatement, ctx *query.ExecutionContext) error {
+	// 执行select语句
+	// 创建数据迭代器
 	cur, err := e.createIterators(ctx, stmt, ctx.ExecutionOptions)
 	if err != nil {
 		return err
@@ -622,6 +624,7 @@ func (e *StatementExecutor) executeSelectStatement(stmt *influxql.SelectStatemen
 	return nil
 }
 
+// 创建数据查询迭代器
 func (e *StatementExecutor) createIterators(ctx context.Context, stmt *influxql.SelectStatement, opt query.ExecutionOptions) (query.Cursor, error) {
 	sopt := query.SelectOptions{
 		NodeID:      opt.NodeID,
@@ -632,6 +635,7 @@ func (e *StatementExecutor) createIterators(ctx context.Context, stmt *influxql.
 	}
 
 	// Create a set of iterators from a selection.
+	// 执行slect请求
 	cur, err := query.Select(ctx, stmt, e.ShardMapper, sopt)
 	if err != nil {
 		return nil, err
@@ -1261,21 +1265,22 @@ func convertRowToPoints(measurementName string, row *models.Row) ([]models.Point
 
 // NormalizeStatement adds a default database and policy to the measurements in statement.
 // Parameter defaultRetentionPolicy can be "".
+// 一般的查询语句在这里执行
 func (e *StatementExecutor) NormalizeStatement(stmt influxql.Statement, defaultDatabase, defaultRetentionPolicy string) (err error) {
 	influxql.WalkFunc(stmt, func(node influxql.Node) {
 		if err != nil {
 			return
 		}
 		switch node := node.(type) {
-		case *influxql.ShowRetentionPoliciesStatement:
+		case *influxql.ShowRetentionPoliciesStatement:     // 查询数据过期策略
 			if node.Database == "" {
 				node.Database = defaultDatabase
 			}
-		case *influxql.ShowMeasurementsStatement:
+		case *influxql.ShowMeasurementsStatement:         // 查询监控的请求处理
 			if node.Database == "" {
 				node.Database = defaultDatabase
 			}
-		case *influxql.ShowTagKeysStatement:
+		case *influxql.ShowTagKeysStatement:              // 查tag
 			if node.Database == "" {
 				node.Database = defaultDatabase
 			}

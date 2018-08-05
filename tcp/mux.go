@@ -64,14 +64,19 @@ func NewMux() *Mux {
 }
 
 // Serve handles connections from ln and multiplexes then across registered listeners.
+// 启动tcp端口
 func (mux *Mux) Serve(ln net.Listener) error {
+	// 这里为啥要加锁
 	mux.mu.Lock()
 	mux.ln = ln
 	mux.mu.Unlock()
+
+	// 一直在这里处理
 	for {
 		// Wait for the next connection.
 		// If it returns a temporary error then simply retry.
 		// If it returns any other error then exit immediately.
+		// 这里会阻塞等待客户端的请求
 		conn, err := ln.Accept()
 		if err, ok := err.(interface {
 			Temporary() bool
@@ -106,12 +111,14 @@ func (mux *Mux) Serve(ln net.Listener) error {
 			return err
 		}
 
+		// 开启一个gorouting来进行处理
 		// Demux in a goroutine to
 		mux.wg.Add(1)
 		go mux.handleConn(conn)
 	}
 }
 
+// 处理请求
 func (mux *Mux) handleConn(conn net.Conn) {
 	defer mux.wg.Done()
 	// Set a read deadline so connections with no data don't timeout.
@@ -122,6 +129,7 @@ func (mux *Mux) handleConn(conn net.Conn) {
 	}
 
 	// Read first byte from connection to determine handler.
+	// 读取数据
 	var typ [1]byte
 	if _, err := io.ReadFull(conn, typ[:]); err != nil {
 		conn.Close()

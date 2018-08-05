@@ -89,6 +89,7 @@ type Results interface {
 	Tags() models.Tags
 }
 
+// 读取数据
 func (s *Store) Read(ctx context.Context, req *ReadRequest) (Results, error) {
 	if len(req.GroupKeys) > 0 {
 		panic("Read: len(Grouping) > 0")

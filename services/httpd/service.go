@@ -94,6 +94,7 @@ func NewService(c Config) *Service {
 func (s *Service) Open() error {
 	s.Logger.Info("Starting HTTP service", zap.Bool("authentication", s.Handler.Config.AuthEnabled))
 
+	// 请求在这里进行处理
 	s.Handler.Open()
 
 	// Open listener.

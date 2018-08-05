@@ -233,22 +233,26 @@ func (e *Executor) WithLogger(log *zap.Logger) {
 // ExecuteQuery executes each statement within a query.
 func (e *Executor) ExecuteQuery(query *influxql.Query, opt ExecutionOptions, closing chan struct{}) <-chan *Result {
 	results := make(chan *Result)
+	// 放在单独的routing里面执行，执行结果放在chan里面
 	go e.executeQuery(query, opt, closing, results)
 	return results
 }
 
+// 执行数据查询,核心的逻辑
 func (e *Executor) executeQuery(query *influxql.Query, opt ExecutionOptions, closing <-chan struct{}, results chan *Result) {
 	defer close(results)
 	defer e.recover(query, results)
 
 	atomic.AddInt64(&e.stats.ActiveQueries, 1)
 	atomic.AddInt64(&e.stats.ExecutedQueries, 1)
+	// 请求耗时统计
 	defer func(start time.Time) {
 		atomic.AddInt64(&e.stats.ActiveQueries, -1)
 		atomic.AddInt64(&e.stats.FinishedQueries, 1)
 		atomic.AddInt64(&e.stats.QueryExecutionDuration, time.Since(start).Nanoseconds())
 	}(time.Now())
 
+	// 放到任务队列里面进行数据查询
 	ctx, detach, err := e.TaskManager.AttachQuery(query, opt, closing)
 	if err != nil {
 		select {
@@ -266,6 +270,7 @@ func (e *Executor) executeQuery(query *influxql.Query, opt ExecutionOptions, clo
 LOOP:
 	for ; i < len(query.Statements); i++ {
 		ctx.statementID = i
+		// 取出查询语句
 		stmt := query.Statements[i]
 
 		// If a default database wasn't passed in by the caller, check the statement.
@@ -308,11 +313,13 @@ LOOP:
 
 		// Rewrite statements, if necessary.
 		// This can occur on meta read statements which convert to SELECT statements.
+		// 重写statement语句
 		newStmt, err := RewriteStatement(stmt)
 		if err != nil {
 			results <- &Result{Err: err}
 			break
 		}
+		// 新的statement语句
 		stmt = newStmt
 
 		// Normalize each statement if possible.

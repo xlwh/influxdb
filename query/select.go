@@ -93,6 +93,7 @@ func Select(ctx context.Context, stmt *influxql.SelectStatement, shardMapper Sha
 	}
 	// Must be deferred so it runs after Select.
 	defer s.Close()
+	// 执行数据查询
 	return s.Select(ctx)
 }
 
@@ -108,6 +109,7 @@ type preparedStatement struct {
 	now       time.Time
 }
 
+// 执行数据查询
 func (p *preparedStatement) Select(ctx context.Context) (Cursor, error) {
 	// TODO(jsternberg): Remove this hacky method of propagating now.
 	// Each level of the query should use a time range discovered during
@@ -617,6 +619,7 @@ func (b *exprIteratorBuilder) callIterator(ctx context.Context, expr *influxql.C
 	return itr, nil
 }
 
+// 构建查询游标
 func buildCursor(ctx context.Context, stmt *influxql.SelectStatement, ic IteratorCreator, opt IteratorOptions) (Cursor, error) {
 	span := tracing.SpanFromContext(ctx)
 	if span != nil {
